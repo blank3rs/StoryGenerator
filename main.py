@@ -1,4 +1,4 @@
-from charTraits.character import Character
+from charTraits.character import Character, Memory  # Import Memory from character.py
 from swarm import Swarm, Agent
 from charTraits.CharFunctions import add_to_memory
 from openai import OpenAI
@@ -41,89 +41,45 @@ def create_world_agent():
         functions=[add_character]
     )
 
-def create_story_world(topic, max_retries=3):
-    """Function to generate initial story details based on topic"""
-    for attempt in range(max_retries):
-        try:
-            world_agent = Agent(
-                name="World",
-                instructions=f"""You are the World agent responsible for creating an engaging story setting and characters based on the topic: {topic}.
-                Create 2-4 characters that would make an interesting conversation/story.
-                
-                You must return your response in the following JSON format:
-                {{
-                    "characters": [
-                        {{
-                            "name": "Character Name",
-                            "tribe": "Character's Group/Affiliation",
-                            "skills": ["Skill 1", "Skill 2", "Skill 3"],
-                            "memory": ["Memory 1", "Memory 2"],
-                            "personality_traits": ["Trait 1", "Trait 2"]
-                        }},
-                        // ... more characters
-                    ]
-                }}
-                
-                IMPORTANT: Respond ONLY with the JSON. Do not add any additional text before or after the JSON.
-                """,
-                model="llama-3.2-1b-instruct"
-            )
-            
-            # Get world agent's character creation response
-            response = swarm_client.run(
-                agent=world_agent,
-                messages=[{
-                    "role": "user", 
-                    "content": f"Create characters for a story about: {topic}. Remember to respond ONLY with the JSON format specified."
-                }]
-            )
-            
-            # Parse the response and create Character objects
-            characters = parse_characters_from_response(response.messages[-1]["content"])
-            
-            if characters:
-                return characters
-            
-            print(f"Attempt {attempt + 1} failed to create characters. Retrying...")
-            
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed with error: {e}")
-            if attempt == max_retries - 1:
-                raise ValueError("Failed to create characters after maximum retries")
-            
-    raise ValueError("No characters were created. The World agent's response could not be parsed.")
-
 def parse_characters_from_response(response_text):
     """Parse the LLM's character descriptions into Character objects"""
     try:
         # Clean up the response text to ensure valid JSON
         response_text = response_text.strip()
-        if not response_text.endswith('}'):
-            # Find the last valid JSON structure
-            last_brace = response_text.rfind('}')
-            if last_brace != -1:
-                response_text = response_text[:last_brace + 1]
-            
+        
+        # Find the first { and last }
         start_idx = response_text.find('{')
-        end_idx = response_text.rfind('}') + 1
-        if start_idx == -1 or end_idx == 0:
-            raise ValueError("No JSON found in response")
+        if start_idx == -1:
+            raise ValueError("No JSON object found in response")
             
-        json_str = response_text[start_idx:end_idx]
+        # Add missing closing braces if needed
+        open_braces = response_text.count('{')
+        close_braces = response_text.count('}')
+        if open_braces > close_braces:
+            response_text += '}' * (open_braces - close_braces)
+            
+        # Extract the JSON portion
+        json_str = response_text[start_idx:]
         data = json.loads(json_str)
         
         characters = []
         for char_data in data.get('characters', []):
+            # Convert memory strings to Memory objects using the from_string class method
+            memory_objects = [
+                Memory.from_string(mem) for mem in char_data.get('memory', [])
+            ]
+            
             character = Character(
                 name=char_data.get('name', 'Unknown'),
                 tribe=char_data.get('tribe', 'Unknown'),
                 skills=char_data.get('skills', []),
-                memory=char_data.get('memory', []),
+                memory=memory_objects,
                 personality_traits=char_data.get('personality_traits', [])
             )
             characters.append(character)
             
         return characters
+        
     except json.JSONDecodeError as e:
         print(f"Failed to parse JSON: {e}")
         print(f"Response text was: {response_text}")
@@ -136,14 +92,84 @@ def parse_characters_from_response(response_text):
 def add_character(name: str, tribe: str, skills: List[str], 
                  memory: List[str], personality_traits: List[str]) -> None:
     """Function to add a new character to the story"""
+    memory_objects = [Memory(content=mem) for mem in memory]
     new_character = Character(
         name=name,
         tribe=tribe,
         skills=skills,
-        memory=memory,
+        memory=memory_objects,
         personality_traits=personality_traits
     )
     return new_character
+
+def create_story_world(topic, max_retries=3):
+    """Function to generate initial story details based on topic"""
+    for attempt in range(max_retries):
+        try:
+            world_agent = Agent(
+                name="World",
+                instructions=f"""You are the World agent responsible for creating an engaging story setting and characters based on the topic: {topic}.
+                Create 2-4 characters that would make an interesting conversation/story.
+                
+                Return ONLY a complete, valid JSON object in this exact format:
+                {{
+                    "characters": [
+                        {{
+                            "name": "Character Name",
+                            "tribe": "Character's Group/Affiliation",
+                            "skills": ["Skill 1", "Skill 2", "Skill 3"],
+                            "memory": ["Memory 1", "Memory 2"],
+                            "personality_traits": ["Trait 1", "Trait 2"]
+                        }}
+                    ]
+                }}
+                
+                Ensure all JSON brackets are properly closed and the response is valid JSON.
+                """,
+                model="llama-3.2-1b-instruct"
+            )
+            
+            # Get world agent's character creation response
+            response = swarm_client.run(
+                agent=world_agent,
+                messages=[{
+                    "role": "user", 
+                    "content": f"Create characters for a story about: {topic}"
+                }]
+            )
+            
+            # Parse the response and create Character objects
+            characters = parse_characters_from_response(response.messages[-1]["content"])
+            
+            if characters:
+                return characters
+            
+            print(f"Attempt {attempt + 1} failed to create characters. Retrying...")
+            time.sleep(1)  # Add a small delay between retries
+            
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed with error: {e}")
+            if attempt == max_retries - 1:
+                # Create a default character as fallback
+                default_character = Character(
+                    name="Default Character",
+                    tribe="Unknown Group",
+                    skills=["Adaptability"],
+                    memory=[Memory(content="I am new to this story")],
+                    personality_traits=["Mysterious"]
+                )
+                return [default_character]
+            time.sleep(1)  # Add a small delay between retries
+            
+    # If we get here, create a default character
+    default_character = Character(
+        name="Default Character",
+        tribe="Unknown Group",
+        skills=["Adaptability"],
+        memory=[Memory(content="I am new to this story")],
+        personality_traits=["Mysterious"]
+    )
+    return [default_character]
 
 def main():
     # Get topic from user
