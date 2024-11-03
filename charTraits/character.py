@@ -32,7 +32,7 @@ class Relationship(BaseModel):
 
 class Character(BaseModel):
     name: str
-    tribe: str
+    affiliation: str
     skills: List[str]
     memory: List[Memory] = Field(default_factory=list)
     personality_traits: List[str]
@@ -46,6 +46,8 @@ class Character(BaseModel):
         "mood": 0.5,
         "health": 1.0
     })
+    archetype: str = Field(default="Support Character")
+    role: str = Field(default="Secondary Character")
 
     def add_memory(self, content: str, importance: int = 1, tags: List[str] = None, 
                   related_characters: List[str] = None) -> None:
@@ -87,13 +89,19 @@ class Character(BaseModel):
 
     def get_personality_summary(self) -> str:
         """Get a summary of character's personality"""
-        return f"{self.name} is a {', '.join(self.personality_traits)} character from the {self.tribe} tribe."
+        return f"{self.name} is a {', '.join(self.personality_traits)} character from the {self.affiliation} tribe."
 
     def get_name(self) -> str:
         return self.name
 
-    def get_tribe(self) -> str:
-        return self.tribe
+    def get_affiliation(self) -> str:
+        return self.affiliation
+
+    def get_archetype(self) -> str:
+        return self.archetype
+
+    def get_role(self) -> str:
+        return self.role
 
     def get_personality_traits(self) -> List[str]:
         return self.personality_traits
